@@ -1,0 +1,66 @@
+---
+### This task file creates admin username and passwd, creates a dir to store config files for each remote hosts
+- name: Uncomment Nagios server config directory line
+  lineinfile: 
+    dest: /usr/local/nagios/etc/nagios.cfg 
+    state: present
+    regexp: "^#cfg_dir=/usr/local/nagios/etc/servers$"
+    line: "cfg_dir=/usr/local/nagios/etc/servers" 
+    backrefs: yes
+  tags:
+    - uncomment
+
+- name: Create directory to store config file for each server
+  file: path=/usr/local/nagios/etc/servers state=directory mode=0755
+  tags:
+    - create_dir
+
+- name: Find and replace email
+  replace: dest=/usr/local/nagios/etc/objects/contacts.cfg regexp="nagios@localhost" replace="{{ user_email }}"
+  tags:
+    - replace_email
+
+- name: Add check_nrpe command to Nagios config
+  blockinfile:
+    dest: /usr/local/nagios/etc/objects/commands.cfg
+    insertafter: EOF
+    content: |
+      define command{
+              command_name check_nrpe
+              command_line $USER1$/check_nrpe -H $HOSTADDRESS$ -c $ARG1$
+      }
+  tags:
+    - add_command
+
+- name: Enable the Apache Rewrite and CGI modules
+  command: "{{ item }}"
+  with_items:
+    - a2enmod rewrite
+    - a2enmod cgi
+  tags:
+    - a2enmod
+
+- name: Create admin username and password for authentication
+  htpasswd: 
+    path: /usr/local/nagios/etc/htpasswd.users
+    name: "{{ username }}"
+    password: "{{ password }}"
+    crypt_scheme: md5_crypt
+  tags:
+    - htpasswd
+
+- name: Create symbolic link of nagios.conf to sites-enabled directory and allow nagios to start automatically
+  file: src={{ item.src }} dest={{ item.dest }} state=link force=yes
+  with_items:
+    - { src: '/etc/apache2/sites-available/nagios.conf', dest: '/etc/apache2/sites-enabled/nagios.conf' }
+    - { src: '/etc/init.d/nagios', dest: '/etc/rcS.d/S99nagios' }
+  tags:
+    - symlink_services
+
+- name: Restart all services
+  service: name={{ item }} state=restarted
+  with_items:
+    - nagios
+    - apache2
+  tags:
+    - symlink_services
